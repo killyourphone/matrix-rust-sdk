@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_arch = "xtensa")]
+type BigAtomicUint = std::sync::atomic::AtomicU32;
+#[cfg(not(target_arch = "xtensa"))]
+type BigAtomicUint = std::sync::atomic::AtomicU64;
 use std::{
     collections::BTreeMap,
     convert::TryInto,
     fmt,
     ops::Deref,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
@@ -488,7 +492,7 @@ pub struct ReadOnlyAccount {
     /// this is None, no action will be taken. After a sync request the client
     /// needs to set this for us, depending on the count we will suggest the
     /// client to upload new keys.
-    uploaded_signed_key_count: Arc<AtomicU64>,
+    uploaded_signed_key_count: Arc<BigAtomicUint>,
 }
 
 /// A typed representation of a base64 encoded string containing the account
@@ -555,7 +559,7 @@ impl ReadOnlyAccount {
             inner: Arc::new(Mutex::new(account)),
             identity_keys: Arc::new(identity_keys),
             shared: Arc::new(AtomicBool::new(false)),
-            uploaded_signed_key_count: Arc::new(AtomicU64::new(0)),
+            uploaded_signed_key_count: Arc::new(BigAtomicUint::new(0)),
         }
     }
 
@@ -580,12 +584,12 @@ impl ReadOnlyAccount {
     ///
     /// * `new_count` - The new count that was reported by the server.
     pub(crate) fn update_uploaded_key_count(&self, new_count: u64) {
-        self.uploaded_signed_key_count.store(new_count, Ordering::SeqCst);
+        self.uploaded_signed_key_count.store(new_count.try_into().unwrap(), Ordering::SeqCst);
     }
 
     /// Get the currently known uploaded key count.
     pub fn uploaded_key_count(&self) -> u64 {
-        self.uploaded_signed_key_count.load(Ordering::SeqCst)
+        self.uploaded_signed_key_count.load(Ordering::SeqCst).into()
     }
 
     /// Has the account been shared with the server.
@@ -748,7 +752,9 @@ impl ReadOnlyAccount {
             inner: Arc::new(Mutex::new(account)),
             identity_keys: Arc::new(identity_keys),
             shared: Arc::new(AtomicBool::from(pickle.shared)),
-            uploaded_signed_key_count: Arc::new(AtomicU64::new(pickle.uploaded_signed_key_count)),
+            uploaded_signed_key_count: Arc::new(BigAtomicUint::new(
+                pickle.uploaded_signed_key_count.try_into().unwrap(),
+            )),
         })
     }
 

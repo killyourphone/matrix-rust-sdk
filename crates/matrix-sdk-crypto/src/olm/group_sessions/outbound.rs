@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_arch = "xtensa")]
+type BigAtomicUint = std::sync::atomic::AtomicU32;
+#[cfg(not(target_arch = "xtensa"))]
+type BigAtomicUint = std::sync::atomic::AtomicU64;
 use std::{
     cmp::max,
     collections::{BTreeMap, BTreeSet},
     fmt,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::Duration,
@@ -124,7 +128,7 @@ pub struct OutboundGroupSession {
     session_id: Arc<str>,
     room_id: Arc<RoomId>,
     pub(crate) creation_time: Arc<Instant>,
-    message_count: Arc<AtomicU64>,
+    message_count: Arc<BigAtomicUint>,
     shared: Arc<AtomicBool>,
     invalidated: Arc<AtomicBool>,
     settings: Arc<EncryptionSettings>,
@@ -181,7 +185,7 @@ impl OutboundGroupSession {
             account_identity_keys: identity_keys,
             session_id: session_id.into(),
             creation_time: Arc::new(Instant::now()),
-            message_count: Arc::new(AtomicU64::new(0)),
+            message_count: Arc::new(BigAtomicUint::new(0)),
             shared: Arc::new(AtomicBool::new(false)),
             invalidated: Arc::new(AtomicBool::new(false)),
             settings: Arc::new(settings),
@@ -317,7 +321,7 @@ impl OutboundGroupSession {
     pub fn expired(&self) -> bool {
         let count = self.message_count.load(Ordering::SeqCst);
 
-        count >= self.settings.rotation_period_msgs
+        u64::from(count) >= self.settings.rotation_period_msgs
             || self.creation_time.elapsed()
                 // Since the encryption settings are provided by users and not
                 // checked someone could set a really low rotation period so
@@ -486,7 +490,8 @@ impl OutboundGroupSession {
     ) -> Result<Self, OlmGroupSessionError> {
         let inner = OlmOutboundGroupSession::unpickle(pickle.pickle.0, pickling_mode)?;
         let session_id = inner.session_id();
-
+        #[cfg(target_arch = "xtensa")]
+        let truncated_message_count: u32 = pickle.message_count.try_into().unwrap();
         Ok(Self {
             inner: Arc::new(Mutex::new(inner)),
             device_id,
@@ -494,7 +499,10 @@ impl OutboundGroupSession {
             session_id: session_id.into(),
             room_id: pickle.room_id,
             creation_time: pickle.creation_time.into(),
-            message_count: AtomicU64::from(pickle.message_count).into(),
+            #[cfg(not(target_arch = "xtensa"))]
+            message_count: BigAtomicUint::from(pickle.message_count).into(),
+            #[cfg(target_arch = "xtensa")]
+            message_count: BigAtomicUint::from(truncated_message_count).into(),
             shared: AtomicBool::from(pickle.shared).into(),
             invalidated: AtomicBool::from(pickle.invalidated).into(),
             settings: pickle.settings,
@@ -526,7 +534,7 @@ impl OutboundGroupSession {
             room_id: self.room_id.clone(),
             settings: self.settings.clone(),
             creation_time: *self.creation_time,
-            message_count: self.message_count.load(Ordering::SeqCst),
+            message_count: self.message_count.load(Ordering::SeqCst).into(),
             shared: self.shared(),
             invalidated: self.invalidated(),
             shared_with_set: self
