@@ -289,21 +289,16 @@ impl IdentityManager {
     ) -> StoreResult<DeviceChanges> {
         let mut changes = DeviceChanges::default();
 
-        let tasks = device_keys_map.into_iter().map(|(user_id, device_keys_map)| {
-            spawn(Self::update_user_devices(
+        for (user_id, device_keys_map) in device_keys_map {
+            let change_fragment = Self::update_user_devices(
                 self.store.clone(),
                 self.user_id.clone(),
                 self.device_id.clone(),
                 user_id,
                 device_keys_map,
-            ))
-        });
-
-        let results = join_all(tasks).await;
-
-        for result in results {
-            let change_fragment = result.expect("Panic while updating user devices")?;
-
+            )
+            .await
+            .expect("Panic while updating user devices");
             changes.extend(change_fragment);
         }
 
